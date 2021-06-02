@@ -1,0 +1,98 @@
+diff -ruN tflite_build_original/ruy/ruy/create_trmul_params.h tflite_build_patched/ruy/ruy/create_trmul_params.h
+--- tflite_build_original/ruy/ruy/create_trmul_params.h	2021-06-02 11:33:04.983001000 +0800
++++ tflite_build_patched/ruy/ruy/create_trmul_params.h	2021-06-02 12:04:07.151001000 +0800
+@@ -389,7 +389,7 @@
+   using MulParamsType = MulParams<AccumScalar, DstScalar>;
+   static_assert(alignof(MulParamsType) <= kMaxMulParamsAlignment, "");
+   static_assert(sizeof(MulParamsType) <= kMaxMulParamsSize, "");
+-  static_assert(std::is_trivially_copyable<MulParamsType>::value, "");
++  static_assert(__has_trivial_copy(MulParamsType), "");
+   auto* dst_mul_params =
+       reinterpret_cast<MulParamsType*>(params->mul_params_bytes);
+   std::memcpy(dst_mul_params, &mul_params, sizeof(MulParamsType));
+diff -ruN tflite_build_original/xnnpack/CMakeLists.txt tflite_build_patched/xnnpack/CMakeLists.txt
+--- tflite_build_original/xnnpack/CMakeLists.txt	2021-06-02 11:33:05.347001000 +0800
++++ tflite_build_patched/xnnpack/CMakeLists.txt	2021-06-02 11:49:22.675001000 +0800
+@@ -2915,10 +2915,6 @@
+ IF(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
+   LIST(APPEND XNNPACK_MICROKERNEL_SRCS ${XNNPACK_NEON_MICROKERNEL_SRCS})
+   LIST(APPEND XNNPACK_MICROKERNEL_SRCS ${XNNPACK_NEONFMA_MICROKERNEL_SRCS})
+-  LIST(APPEND XNNPACK_MICROKERNEL_SRCS ${XNNPACK_NEONV8_MICROKERNEL_SRCS})
+-  IF(NOT IOS)
+-    LIST(APPEND XNNPACK_MICROKERNEL_SRCS ${XNNPACK_NEONDOT_MICROKERNEL_SRCS})
+-  ENDIF()
+   IF(XNNPACK_ENABLE_ASSEMBLY)
+     LIST(APPEND XNNPACK_MICROKERNEL_SRCS ${XNNPACK_AARCH32_ASM_MICROKERNEL_SRCS})
+   ENDIF()
+@@ -2966,9 +2962,6 @@
+   IF(IOS)
+     SET_PROPERTY(SOURCE ${XNNPACK_NEONV8_MICROKERNEL_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -mcpu=cyclone -mtune=generic ")
+     SET_PROPERTY(SOURCE ${XNNPACK_AARCH32_ASM_MICROKERNEL_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -arch ${IOS_ARCH} ")
+-  ELSE()
+-    SET_PROPERTY(SOURCE ${XNNPACK_NEONV8_MICROKERNEL_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -march=armv8-a -mfpu=neon-fp-armv8 ")
+-    SET_PROPERTY(SOURCE ${XNNPACK_NEONDOT_MICROKERNEL_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -march=armv8.2-a+dotprod -mfpu=neon-fp-armv8 ")
+   ENDIF()
+   # Workground the neon detection bug in ARM v8
+   # Related links:
+diff -ruN tflite_build_original/xnnpack/src/init.c tflite_build_patched/xnnpack/src/init.c
+--- tflite_build_original/xnnpack/src/init.c	2021-06-02 11:33:05.351001000 +0800
++++ tflite_build_patched/xnnpack/src/init.c	2021-06-02 11:49:22.747001000 +0800
+@@ -110,15 +110,7 @@
+     #ifndef XNN_NO_QS8_OPERATORS
+       init_flags |= XNN_INIT_FLAG_QS8;
+ 
+-      if (!XNN_PLATFORM_IOS && cpuinfo_has_arm_neon_dot()) {
+-        xnn_params.qs8.gemm.minmax.gemm = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_4x8c4__neondot);
+-        xnn_params.qs8.gemm.minmax.gemm1 = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_1x8c4__neondot);
+-        xnn_params.qs8.gemm.minmax.igemm = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_4x8c4__neondot);
+-        xnn_params.qs8.gemm.minmax.igemm1 = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_1x8c4__neondot);
+-        xnn_params.qs8.gemm.mr = 4;
+-        xnn_params.qs8.gemm.nr = 8;
+-        xnn_params.qs8.gemm.log2_kr = 2;
+-      } else {
++      {
+         xnn_params.qs8.gemm.minmax.gemm = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_2x8c2__neon_mlal_padal_dup);
+         xnn_params.qs8.gemm.minmax.igemm = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_2x8c2__neon_mlal_padal_dup);
+         xnn_params.qs8.gemm.minmax.gemm1 = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_1x8c2__neon_mlal_padal_dup);
+@@ -367,12 +359,7 @@
+       xnn_params.f32.hswish = (xnn_univector_ukernel_function) xnn_f32_hswish_ukernel__neon_x16;
+       xnn_params.f32.lrelu = (xnn_univector_ukernel_function) xnn_f32_vlrelu_ukernel__neon_x8;
+       xnn_params.f32.neg = (xnn_univector_ukernel_function) xnn_f32_vneg_ukernel__neon_x8;
+-      if (cpuinfo_has_arm_neon_v8()) {
+-        xnn_params.f32.rndne = (xnn_univector_ukernel_function) xnn_f32_vrndne_ukernel__neonv8_x8;
+-        xnn_params.f32.rndz  = (xnn_univector_ukernel_function) xnn_f32_vrndz_ukernel__neonv8_x8;
+-        xnn_params.f32.rndu  = (xnn_univector_ukernel_function) xnn_f32_vrndu_ukernel__neonv8_x8;
+-        xnn_params.f32.rndd  = (xnn_univector_ukernel_function) xnn_f32_vrndd_ukernel__neonv8_x8;
+-      } else {
++      {
+         xnn_params.f32.rndne = (xnn_univector_ukernel_function) xnn_f32_vrndne_ukernel__neon_x8;
+         xnn_params.f32.rndz  = (xnn_univector_ukernel_function) xnn_f32_vrndz_ukernel__neon_x8;
+         xnn_params.f32.rndu  = (xnn_univector_ukernel_function) xnn_f32_vrndu_ukernel__neon_x8;
+@@ -939,15 +926,7 @@
+         }
+         #endif  // XNN_MAX_UARCH_TYPES > 1
+       #else  // !XNN_ENABLE_ASSEMBLY
+-        if (cpuinfo_has_arm_neon_dot()) {
+-          xnn_params.qs8.gemm.minmax.gemm = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_4x16c4__neondot);
+-          xnn_params.qs8.gemm.minmax.gemm1 = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_1x16c4__neondot);
+-          xnn_params.qs8.gemm.minmax.igemm = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_4x16c4__neondot);
+-          xnn_params.qs8.gemm.minmax.igemm1 = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_1x16c4__neondot);
+-          xnn_params.qs8.gemm.mr = 4;
+-          xnn_params.qs8.gemm.nr = 16;
+-          xnn_params.qs8.gemm.log2_kr = 2;
+-        } else {
++        {
+           xnn_params.qs8.gemm.minmax.gemm = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_2x8c2__neon_mlal_padal_dup);
+           xnn_params.qs8.gemm.minmax.igemm = xnn_init_hmp_igemm_ukernel((xnn_igemm_ukernel_function) xnn_qs8_igemm_minmax_ukernel_2x8c2__neon_mlal_padal_dup);
+           xnn_params.qs8.gemm.minmax.gemm1 = xnn_init_hmp_gemm_ukernel((xnn_gemm_ukernel_function) xnn_qs8_gemm_minmax_ukernel_1x8c2__neon_mlal_padal_dup);
+@@ -1326,10 +1305,6 @@
+     xnn_params.f32.hswish = (xnn_univector_ukernel_function) xnn_f32_hswish_ukernel__neon_x16;
+     xnn_params.f32.lrelu = (xnn_univector_ukernel_function) xnn_f32_vlrelu_ukernel__neon_x8;
+     xnn_params.f32.neg = (xnn_univector_ukernel_function) xnn_f32_vneg_ukernel__neon_x8;
+-    xnn_params.f32.rndne = (xnn_univector_ukernel_function) xnn_f32_vrndne_ukernel__neonv8_x8;
+-    xnn_params.f32.rndz = (xnn_univector_ukernel_function) xnn_f32_vrndz_ukernel__neonv8_x8;
+-    xnn_params.f32.rndu = (xnn_univector_ukernel_function) xnn_f32_vrndu_ukernel__neonv8_x8;
+-    xnn_params.f32.rndd = (xnn_univector_ukernel_function) xnn_f32_vrndd_ukernel__neonv8_x8;
+     xnn_params.f32.sigmoid = (xnn_univector_ukernel_function) xnn_f32_sigmoid_ukernel__neonfma_rr1_lut64_p2_nr2recps_x16;
+     xnn_params.f32.sqr = (xnn_univector_ukernel_function) xnn_f32_vsqr_ukernel__neon_x8;
+     xnn_params.f32.sqrt = (xnn_univector_ukernel_function) xnn_f32_vsqrt_ukernel__neon_sqrt_x4;
